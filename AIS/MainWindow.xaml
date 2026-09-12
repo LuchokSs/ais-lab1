@@ -1,0 +1,110 @@
+﻿<Window x:Class="AIS.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:AIS"
+        mc:Ignorable="d"
+        Title="Экспертная система" Height="650" Width="900">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <local:InvertedBoolToVisibilityConverter x:Key="InvertedBoolToVisibilityConverter"/>
+    </Window.Resources>
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Правила" Grid.Row="0" Margin="0,0,0,4" FontWeight="Bold"/>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="RulesList" Margin="0,0,0,6">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="#888" BorderThickness="1" CornerRadius="3" Padding="6" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0">
+                                    <TextBlock Text="ЕСЛИ:" FontWeight="SemiBold"/>
+                                    <TextBox Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             FontFamily="Consolas" AcceptsReturn="True" Height="60" TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Visibility="{Binding IsTraceMode, Converter={StaticResource InvertedBoolToVisibilityConverter}}"/>
+                                    <ItemsControl ItemsSource="{Binding InputConditions}"
+                                                  Visibility="{Binding IsTraceMode, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{Binding Background}" Padding="4,2" Margin="0,1" CornerRadius="2">
+                                                    <TextBlock Text="{Binding Text}" FontFamily="Consolas"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="ТО:" FontWeight="SemiBold"/>
+                                    <TextBox Text="{Binding OutputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             FontFamily="Consolas" Margin="0,2,0,4"/>
+                                </StackPanel>
+
+                                <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                                        Content="Удалить" VerticalAlignment="Top" Margin="6,0,0,0"
+                                        Padding="8,3" Click="DeleteRule_Click"
+                                        Tag="{Binding}"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="AddRuleButton" Content="Добавить правило" Padding="10,3" Margin="0,0,8,0"
+                    Click="AddRule_Click"/>
+            <Button x:Name="SaveButton" Content="Сохранить файл" Padding="10,3" Margin="0,0,8,0"
+                    Click="SaveButton_Click"/>
+            <Button x:Name="ReloadButton" Content="Перечитать файл" Padding="10,3" Margin="0,0,8,0"
+                    Click="ReloadButton_Click"/>
+            <Button x:Name="ShowTraceButton" Content="Показать трассировку" Padding="10,3" Margin="0,0,8,0"
+                    Click="ShowTrace_Click"/>
+            <Button x:Name="StopTraceButton" Content="Остановить трассировку" Padding="10,3" Margin="0,0,8,0"
+                    IsEnabled="False"
+                    Click="StopTrace_Click"/>
+            <Button x:Name="ResetTraceButton" Content="Сбросить трассировку" Padding="10,3" IsEnabled="False"
+                    Click="ResetTrace_Click"/>
+        </StackPanel>
+
+        <TextBlock Text="Начальное состояние"
+                   Grid.Row="3" Margin="0,12,0,4" FontWeight="Bold">
+            <TextBlock.ToolTip>
+                <TextBlock>Вводите данные по одному факту в строке, если факт имеет значение - введите его после двоеточия, например "температура: высокая"</TextBlock>
+            </TextBlock.ToolTip>
+        </TextBlock>
+        <Grid Grid.Row="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <RichTextBox x:Name="TokensRichTextBox" Grid.Row="0" Height="120"
+                         VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+            <Button x:Name="RunButton" Grid.Row="1" Content="Получить результат"
+                    Margin="0,6,0,0" Padding="10,3" HorizontalAlignment="Left"
+                    Click="RunButton_Click"/>
+            <GroupBox Grid.Row="2" Header="Результат" Margin="0,12,0,0">
+                <TextBox x:Name="ResultTextBox" Height="90" IsReadOnly="True"
+                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+            </GroupBox>
+        </Grid>
+    </Grid>
+</Window>
