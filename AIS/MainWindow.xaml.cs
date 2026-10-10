@@ -44,7 +44,9 @@ namespace AIS
     {
         private string _outputText = "";
         private string _inputText = "";
+        private string _traceStatus = "";
         private bool _isTraceMode;
+        private TraceConditionItem? _outputCondition;
 
         public string OutputText
         {
@@ -58,13 +60,37 @@ namespace AIS
             set { _inputText = value; OnPropertyChanged(); }
         }
 
+        public string TraceStatus
+        {
+            get => _traceStatus;
+            set { _traceStatus = value; OnPropertyChanged(); }
+        }
+
         public bool IsTraceMode
         {
             get => _isTraceMode;
             set { _isTraceMode = value; OnPropertyChanged(); }
         }
 
+        public TraceConditionItem? OutputCondition
+        {
+            get => _outputCondition;
+            set { _outputCondition = value; OnPropertyChanged(); }
+        }
+
         public ObservableCollection<TraceConditionItem> InputConditions { get; } = new();
+
+        public IEnumerable<TraceConditionItem> AllConditions
+        {
+            get
+            {
+                foreach (var condition in InputConditions)
+                    yield return condition;
+
+                if (OutputCondition is not null)
+                    yield return OutputCondition;
+            }
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
         private void OnPropertyChanged([CallerMemberName] string? name = null)
@@ -73,19 +99,32 @@ namespace AIS
 
     public partial class MainWindow : Window
     {
+        private static readonly TimeSpan ForwardStepDelay = TimeSpan.FromMilliseconds(1000);
+        private static readonly TimeSpan ReverseStepDelay = TimeSpan.FromMilliseconds(400);
+
+        private static readonly Brush BrushConditionInspect = Brushes.Yellow;
+        private static readonly Brush BrushConditionRequired = Brushes.LightSkyBlue;
+        private static readonly Brush BrushRuleInspect = Brushes.Yellow;
+        private static readonly Brush BrushRuleCommit = Brushes.LightGreen;
+        private static readonly Brush BrushGoalActive = Brushes.Orange;
+        private static readonly Brush BrushFactConfirmed = Brushes.LightGreen;
+        private static readonly Brush BrushFactMissing = Brushes.MistyRose;
+
         private readonly ObservableCollection<RuleRow> _rules = new();
         private Dictionary<ConditionSequence, int> _seqToRuleIndex = new();
         private Dictionary<ConditionItem, int> _itemToRuleIndex = new();
         private Dictionary<ConditionItem, int> _itemToPosition = new();
+        private Dictionary<ConditionItem, int> _outputToRuleIndex = new();
         private string _originalTokensText = "";
+        private bool _bankIsEmpty = true;
         private bool _isTraceRunning;
-        private CancellationTokenSource? _traceCts;
 
         public MainWindow()
         {
             InitializeComponent();
             RulesList.ItemsSource = _rules;
             LoadRules();
+            ClearBank();
         }
 
         private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
@@ -212,11 +251,10 @@ namespace AIS
             {
                 SaveThroughContext();
                 LogContext.States.Clear();
+                ClearBank();
 
                 var expert = new ExpertSystem();
-                var tokensText = new TextRange(TokensRichTextBox.Document.ContentStart,
-                    TokensRichTextBox.Document.ContentEnd).Text;
-                foreach (var line in tokensText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                foreach (var line in ReadFacts())
                 {
                     expert.AddToken(line);
                 }
@@ -238,58 +276,65 @@ namespace AIS
             }
         }
 
+        private void CheckButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SaveThroughContext();
+                LogContext.ReverseStates.Clear();
+                ClearBank();
+
+                var expert = new ExpertSystem();
+                foreach (var line in ReadFacts())
+                {
+                    expert.AddToken(line);
+                }
+
+                var goalText = GoalTextBox.Text.Trim();
+                if (goalText.Length == 0)
+                {
+                    ResultTextBox.Text = "Укажите предполагаемый результат в поле «Предполагаемый результат».";
+                    return;
+                }
+
+                var verdict = expert.GetRevesedResult(expert.ParseToken(goalText));
+
+                if (verdict.IsSuccess)
+                {
+                    ResultTextBox.Text = $"Результат: {verdict.Result}";
+                }
+                else
+                {
+                    ResultTextBox.Text = $"Недостаточно данных: {verdict.Result}";
+                }
+            }
+            catch (Exception ex)
+            {
+                ResultTextBox.Text = $"Ошибка: {ex.Message}";
+            }
+        }
+
+        private IEnumerable<string> ReadFacts()
+        {
+            var text = new TextRange(TokensRichTextBox.Document.ContentStart,
+                TokensRichTextBox.Document.ContentEnd).Text;
+
+            foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                yield return line;
+        }
+
         private async void ShowTrace_Click(object sender, RoutedEventArgs e)
         {
-            if (_isTraceRunning || LogContext.States.Count == 0)
+            if (!BeginTrace(LogContext.States, reverse: false))
                 return;
-
-            _isTraceRunning = true;
-            _traceCts = new CancellationTokenSource();
-            var context = GetContext();
-
-            if (context.ConditionSequences.Count != _rules.Count)
-            {
-                _traceCts.Dispose();
-                _traceCts = null;
-                _isTraceRunning = false;
-                MessageBox.Show("Правила были изменены после запуска. Запустите систему заново.",
-                    "Предупреждение", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            _seqToRuleIndex = new Dictionary<ConditionSequence, int>();
-            _itemToRuleIndex = new Dictionary<ConditionItem, int>();
-            _itemToPosition = new Dictionary<ConditionItem, int>();
-
-            for (int i = 0; i < context.ConditionSequences.Count; i++)
-            {
-                var seq = context.ConditionSequences[i];
-                _seqToRuleIndex[seq] = i;
-
-                var row = _rules[i];
-                row.InputConditions.Clear();
-                for (int j = 0; j < seq.Input.Count; j++)
-                {
-                    var item = seq.Input[j];
-                    _itemToRuleIndex[item] = i;
-                    _itemToPosition[item] = j;
-                    row.InputConditions.Add(new TraceConditionItem { Text = $"{item.Object} = {item.Value}" });
-                }
-                row.IsTraceMode = true;
-            }
-
-            _originalTokensText = new TextRange(TokensRichTextBox.Document.ContentStart,
-                TokensRichTextBox.Document.ContentEnd).Text;
-            PopulateTokens(_originalTokensText);
-
-            ShowTraceButton.IsEnabled = false;
-            StopTraceButton.IsEnabled = true;
-            SetEditControlsEnabled(false);
 
             var states = LogContext.States;
-            for (int i = 0; i < states.Count && !_traceCts.IsCancellationRequested; i++)
+
+            for (int i = 0; i < states.Count; i++)
             {
                 var state = states[i];
+                SetStepCaption(i + 1, states.Count, state);
+
                 ClearTokenHighlight();
 
                 switch (state.LogStateType)
@@ -304,63 +349,223 @@ namespace AIS
                         break;
                     case LogStateType.SequenceInspect:
                         if (state.ConditionSequence is not null)
-                            await ApplySequenceHighlight(state.ConditionSequence, Brushes.Yellow);
+                            await ApplySequenceHighlight(state.ConditionSequence, BrushRuleInspect);
                         break;
                     case LogStateType.Commit:
                         if (state.ConditionSequence is not null)
-                            await ApplySequenceHighlight(state.ConditionSequence, Brushes.LightGreen);
+                            await ApplySequenceHighlight(state.ConditionSequence, BrushRuleCommit);
                         break;
                     case LogStateType.AddVariable:
                         if (state.ExpertSystemToken is not null)
-                            AddVariableToTokens(state.ExpertSystemToken);
+                            AddVariableToBank(state.ExpertSystemToken);
                         break;
                 }
 
-                try
-                {
-                    await Task.Delay(1000, _traceCts.Token);
-                }
-                catch (TaskCanceledException)
-                {
-                    break;
-                }
+                await Task.Delay(ForwardStepDelay);
             }
 
-            var wasCancelled = _traceCts.IsCancellationRequested;
-            _traceCts.Dispose();
-            _traceCts = null;
+            EndTrace("Трассировка прямого прохода завершена.");
+        }
 
-            if (wasCancelled)
-            {
-                ResetTrace();
-                MessageBox.Show("Трассировка остановлена.", "Информация",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+        private async void ShowReverseTrace_Click(object sender, RoutedEventArgs e)
+        {
+            if (!BeginTrace(LogContext.ReverseStates, reverse: true))
                 return;
+
+            var states = LogContext.ReverseStates;
+
+            for (int i = 0; i < states.Count; i++)
+            {
+                var state = states[i];
+                SetStepCaption(i + 1, states.Count, state);
+
+                ClearTokenHighlight();
+                ClearConditionHighlights();
+
+                switch (state.LogStateType)
+                {
+                    case LogStateType.GoalSet:
+                        ApplyGoalHighlight();
+                        break;
+                    case LogStateType.ReverseSequenceInspect:
+                        if (state.ConditionSequence is not null)
+                            await ApplyReverseSequenceHighlight(state.ConditionSequence);
+                        break;
+                    case LogStateType.ReverseInspect:
+                        if (state.ConditionItem is not null && state.InspectedToken is not null)
+                            await ApplyReverseInspectHighlight(state.ConditionItem, state.InspectedToken);
+                        break;
+                    case LogStateType.ReverseCommit:
+                        if (state.ConditionSequence is not null)
+                            await ApplyReverseCommitHighlight(state.ConditionSequence);
+                        break;
+                    case LogStateType.BankAdd:
+                        if (state.ConditionItem is not null && state.ExpertSystemToken is not null)
+                            await ApplyBankAddHighlight(state.ConditionItem, state.ExpertSystemToken);
+                        break;
+                    case LogStateType.TokenCheck:
+                        if (state.ExpertSystemToken is not null)
+                            await ApplyTokenCheckHighlight(state.ExpertSystemToken, state.Checked ?? false);
+                        break;
+                    case LogStateType.PassEnd:
+                        await ApplyPassEndHighlight();
+                        break;
+                }
+
+                await Task.Delay(ReverseStepDelay);
             }
 
-            MessageBox.Show("Трассировка завершена.", "Информация",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            EndTrace("Трассировка обратного прохода завершена.");
+        }
 
-            StopTraceButton.IsEnabled = false;
+        private bool BeginTrace(IReadOnlyList<LogState> states, bool reverse)
+        {
+            if (_isTraceRunning)
+                return false;
+
+            if (states.Count == 0)
+            {
+                MessageBox.Show(reverse
+                        ? "Нет данных обратного прохода. Сначала нажмите «Проверить результат»."
+                        : "Нет данных прямого прохода. Сначала нажмите «Получить результат».",
+                    "Предупреждение", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            _isTraceRunning = true;
+
+            if (!PrepareTraceView())
+            {
+                _isTraceRunning = false;
+                return false;
+            }
+
+            _originalTokensText = new TextRange(TokensRichTextBox.Document.ContentStart,
+                TokensRichTextBox.Document.ContentEnd).Text;
+            PopulateTokens(_originalTokensText);
+            ClearBank();
+
+            GoalTextBox.Background = null;
+            GoalTextBox.IsEnabled = !reverse;
+            TraceStepText.Text = "";
+            ShowTraceButton.IsEnabled = false;
+            ShowReverseTraceButton.IsEnabled = false;
+            BlockOverlay.Visibility = Visibility.Visible;
+
+            return true;
+        }
+
+        private void EndTrace(string message)
+        {
+            MessageBox.Show(message, "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+
+            BlockOverlay.Visibility = Visibility.Collapsed;
+            SetEditControlsEnabled(false);
             ResetTraceButton.IsEnabled = true;
         }
 
+        private bool PrepareTraceView()
+        {
+            var context = GetContext();
+
+            if (context.ConditionSequences.Count != _rules.Count)
+            {
+                MessageBox.Show("Правила были изменены после запуска. Запустите систему заново.",
+                    "Предупреждение", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            _seqToRuleIndex = new Dictionary<ConditionSequence, int>();
+            _itemToRuleIndex = new Dictionary<ConditionItem, int>();
+            _itemToPosition = new Dictionary<ConditionItem, int>();
+            _outputToRuleIndex = new Dictionary<ConditionItem, int>();
+
+            for (int i = 0; i < context.ConditionSequences.Count; i++)
+            {
+                var seq = context.ConditionSequences[i];
+                _seqToRuleIndex[seq] = i;
+                _outputToRuleIndex[seq.Output] = i;
+
+                var row = _rules[i];
+                row.InputConditions.Clear();
+                row.TraceStatus = "";
+
+                for (int j = 0; j < seq.Input.Count; j++)
+                {
+                    var item = seq.Input[j];
+                    _itemToRuleIndex[item] = i;
+                    _itemToPosition[item] = j;
+                    row.InputConditions.Add(new TraceConditionItem { Text = $"{item.Object} = {item.Value}" });
+                }
+
+                row.OutputCondition = new TraceConditionItem { Text = $"{seq.Output.Object} = {seq.Output.Value}" };
+                row.IsTraceMode = true;
+            }
+
+            return true;
+        }
+
+        private void SetStepCaption(int step, int total, LogState state)
+        {
+            TraceStepText.Text = $"Шаг {step}/{total}. {Describe(state)}";
+        }
+
+        private static string Describe(LogState state)
+        {
+            switch (state.LogStateType)
+            {
+                case LogStateType.Inspect:
+                    return $"Проверка «{Format(state.ConditionItem)}» на факте «{Format(state.InspectedToken)}».";
+                case LogStateType.Partial:
+                    return $"Условие «{Format(state.ConditionItem)}» выполнено.";
+                case LogStateType.SequenceInspect:
+                    return $"Проверка правила «{Format(state.ConditionSequence?.Output)}».";
+                case LogStateType.Commit:
+                    return $"Правило «{Format(state.ConditionSequence?.Output)}» сработало.";
+                case LogStateType.AddVariable:
+                    return $"Новая переменная «{Format(state.ExpertSystemToken)}» помещена в банк.";
+                case LogStateType.GoalSet:
+                    return $"Цель обратного прохода: «{Format(state.ExpertSystemToken)}».";
+                case LogStateType.ReverseSequenceInspect:
+                    return $"Итерация {state.Iteration}: проверка правила «{Format(state.ConditionSequence?.Output)}».";
+                case LogStateType.ReverseInspect:
+                    return $"Сравнение «{Format(state.ConditionItem)}» с целью «{Format(state.InspectedToken)}».";
+                case LogStateType.ReverseCommit:
+                    return $"Правило «{Format(state.ConditionSequence?.Output)}» подходит, его посылки становятся требованиями.";
+                case LogStateType.BankAdd:
+                    return $"Требование «{Format(state.ExpertSystemToken)}» добавлено в банк.";
+                case LogStateType.TokenCheck:
+                    return state.Checked == true
+                        ? $"Факт «{Format(state.ExpertSystemToken)}» подтверждён исходными данными."
+                        : $"Факт «{Format(state.ExpertSystemToken)}» не подтверждён исходными данными.";
+                case LogStateType.PassEnd:
+                    return $"Обратный проход завершён: {state.Message}.";
+                default:
+                    return state.LogStateType.ToString();
+            }
+        }
+
+        private static string Format(ConditionItem? item)
+            => item is null ? "?" : $"{item.Object} = {item.Value}";
+
+        private static string Format(ExpertSystemToken? token)
+            => token is null ? "?" : $"{token.Object} = {token.Value}";
+
         private async Task ApplyInspectHighlight(ConditionItem item, ExpertSystemToken? token)
         {
-            ClearInspectHighlights();
+            ClearConditionHighlights();
 
             if (!_itemToRuleIndex.TryGetValue(item, out var idx) ||
                 !_itemToPosition.TryGetValue(item, out var pos) ||
                 idx < 0 || idx >= _rules.Count)
                 return;
 
-            _rules[idx].InputConditions[pos].Background = Brushes.Yellow;
+            _rules[idx].InputConditions[pos].Background = BrushConditionInspect;
 
             if (token is not null)
-                HighlightToken(token);
+                HighlightToken(token, BrushConditionInspect);
 
-            var container = RulesList.ItemContainerGenerator.ContainerFromIndex(idx) as ContentPresenter;
-            container?.BringIntoView();
+            BringRuleIntoView(idx);
             await Task.CompletedTask;
         }
 
@@ -371,10 +576,9 @@ namespace AIS
                 idx < 0 || idx >= _rules.Count)
                 return;
 
-            _rules[idx].InputConditions[pos].Background = Brushes.LightGreen;
+            _rules[idx].InputConditions[pos].Background = BrushRuleCommit;
 
-            var container = RulesList.ItemContainerGenerator.ContainerFromIndex(idx) as ContentPresenter;
-            container?.BringIntoView();
+            BringRuleIntoView(idx);
             await Task.CompletedTask;
         }
 
@@ -398,16 +602,131 @@ namespace AIS
             await Task.CompletedTask;
         }
 
-        private void AddVariableToTokens(ExpertSystemToken token)
+        private void ApplyGoalHighlight()
         {
-            var run = new Run($"{token.Object} = {token.Value}")
+            GoalTextBox.Background = BrushGoalActive;
+        }
+
+        private async Task ApplyReverseSequenceHighlight(ConditionSequence seq)
+        {
+            SetRuleStatus(seq, "Проверяем вывод правила");
+            await ApplySequenceHighlight(seq, BrushRuleInspect);
+        }
+
+        private async Task ApplyReverseInspectHighlight(ConditionItem output, ExpertSystemToken goal)
+        {
+            if (_outputToRuleIndex.TryGetValue(output, out var idx) && idx < _rules.Count)
             {
-                Foreground = Brushes.Blue,
+                var row = _rules[idx];
+                if (row.OutputCondition is not null)
+                    row.OutputCondition.Background = BrushConditionInspect;
+
+                BringRuleIntoView(idx);
+            }
+
+            ApplyGoalHighlight();
+            await Task.CompletedTask;
+        }
+
+        private async Task ApplyReverseCommitHighlight(ConditionSequence seq)
+        {
+            SetRuleStatus(seq, "Найдено соответствие ТО проверяемому конечному элементу");
+
+            if (_seqToRuleIndex.TryGetValue(seq, out var idx) && idx < _rules.Count &&
+                _rules[idx].OutputCondition is TraceConditionItem output)
+            {
+                output.Background = BrushRuleCommit;
+            }
+
+            await ApplySequenceHighlight(seq, BrushRuleCommit);
+        }
+
+        private async Task ApplyBankAddHighlight(ConditionItem required, ExpertSystemToken token)
+        {
+            SetRuleStatus(required, "Данные ЕСЛИ добавлены в банк");
+
+            if (_itemToRuleIndex.TryGetValue(required, out var idx) &&
+                _itemToPosition.TryGetValue(required, out var pos) &&
+                idx < _rules.Count)
+            {
+                _rules[idx].InputConditions[pos].Background = BrushConditionRequired;
+                BringRuleIntoView(idx);
+            }
+
+            AddVariableToBank(token);
+            await Task.CompletedTask;
+        }
+
+        private async Task ApplyTokenCheckHighlight(ExpertSystemToken token, bool confirmed)
+        {
+            foreach (var run in FindBankRuns(token))
+            {
+                run.Background = confirmed ? BrushFactConfirmed : BrushFactMissing;
+                run.Foreground = confirmed ? Brushes.SeaGreen : Brushes.Firebrick;
+            }
+
+            if (confirmed)
+                HighlightToken(token, BrushFactConfirmed);
+
+            await Task.CompletedTask;
+        }
+
+        private async Task ApplyPassEndHighlight()
+        {
+            GoalTextBox.Background = null;
+            TraceStepText.FontWeight = FontWeights.Bold;
+            await Task.Delay(ReverseStepDelay);
+        }
+
+        private void SetRuleStatus(ConditionSequence seq, string text)
+        {
+            if (_seqToRuleIndex.TryGetValue(seq, out var idx) && idx < _rules.Count)
+                _rules[idx].TraceStatus = text;
+        }
+
+        private void SetRuleStatus(ConditionItem item, string text)
+        {
+            if (_itemToRuleIndex.TryGetValue(item, out var idx) && idx < _rules.Count)
+                _rules[idx].TraceStatus = text;
+        }
+
+        private void BringRuleIntoView(int index)
+        {
+            if (index < 0 || index >= _rules.Count)
+                return;
+
+            var container = RulesList.ItemContainerGenerator.ContainerFromIndex(index) as ContentPresenter;
+            container?.BringIntoView();
+        }
+
+        private static string TokenKey(ExpertSystemToken token)
+            => TokenKey(token.Object, token.Value);
+
+        private static string TokenKey(string obj, string value)
+            => $"{obj}\u0001{value}";
+
+        private void AddVariableToBank(ExpertSystemToken token)
+        {
+            if (_bankIsEmpty)
+            {
+                BankRichTextBox.Document.Blocks.Clear();
+                _bankIsEmpty = false;
+            }
+
+            var run = new Run(Format(token))
+            {
+                Foreground = Brushes.DarkOrange,
                 FontWeight = FontWeights.SemiBold,
-                Tag = $"{token.Object}\u0001{token.Value}"
+                Tag = TokenKey(token)
             };
-            TokensRichTextBox.Document.Blocks.Add(new Paragraph(run));
-            TokensRichTextBox.ScrollToEnd();
+            BankRichTextBox.Document.Blocks.Add(new Paragraph(run));
+            BankRichTextBox.ScrollToEnd();
+        }
+
+        private void ClearBank()
+        {
+            BankRichTextBox.Document.Blocks.Clear();
+            _bankIsEmpty = true;
         }
 
         private static (string Object, string Value) NormalizeTokenLine(string line)
@@ -427,7 +746,7 @@ namespace AIS
             foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 var (obj, val) = NormalizeTokenLine(line);
-                TokensRichTextBox.Document.Blocks.Add(new Paragraph(new Run(line) { Tag = $"{obj}\u0001{val}" }));
+                TokensRichTextBox.Document.Blocks.Add(new Paragraph(new Run(line) { Tag = TokenKey(obj, val) }));
             }
         }
 
@@ -444,40 +763,54 @@ namespace AIS
             }
         }
 
+        private IEnumerable<Run> FindBankRuns(ExpertSystemToken token)
+        {
+            var key = TokenKey(token);
+            foreach (var run in EnumerateRuns(BankRichTextBox.Document))
+            {
+                if (run.Tag as string == key)
+                    yield return run;
+            }
+        }
+
         private void ClearTokenHighlight()
         {
             foreach (var run in EnumerateRuns(TokensRichTextBox.Document))
             {
-                if (run.Background == Brushes.Yellow)
+                if (run.Background == BrushConditionInspect || run.Background == BrushFactConfirmed)
                     run.Background = null;
             }
         }
 
-        private void HighlightToken(ExpertSystemToken token)
+        private void HighlightToken(ExpertSystemToken token, Brush brush)
         {
-            var key = $"{token.Object}\u0001{token.Value}";
+            var key = TokenKey(token);
             foreach (var run in EnumerateRuns(TokensRichTextBox.Document))
             {
                 if (run.Tag as string == key)
                 {
-                    run.Background = Brushes.Yellow;
+                    run.Background = brush;
                     break;
                 }
             }
         }
 
-        private void ClearInspectHighlights()
+        private void ClearConditionHighlights()
         {
-            foreach (var cond in _rules.SelectMany(r => r.InputConditions))
-                if (cond.Background == Brushes.Yellow)
-                    cond.Background = null;
+            foreach (var rule in _rules)
+            {
+                foreach (var condition in rule.AllConditions)
+                {
+                    if (condition.Background == BrushConditionInspect)
+                        condition.Background = null;
+                }
+            }
         }
 
         private void SetEditControlsEnabled(bool enabled)
         {
             foreach (var btn in FindVisualChildren<Button>(RulesList))
-                if (btn.Content as string == "Удалить")
-                    btn.IsEnabled = enabled;
+                if (btn.Content as string == "Удалить") btn.IsEnabled = enabled;
             foreach (var tb in FindVisualChildren<TextBox>(RulesList))
                 tb.IsEnabled = enabled;
 
@@ -485,29 +818,26 @@ namespace AIS
             SaveButton.IsEnabled = enabled;
             ReloadButton.IsEnabled = enabled;
             RunButton.IsEnabled = enabled;
+            CheckButton.IsEnabled = enabled;
             ShowTraceButton.IsEnabled = enabled;
+            ShowReverseTraceButton.IsEnabled = enabled;
+            GoalTextBox.IsEnabled = enabled;
             TokensRichTextBox.IsReadOnly = !enabled;
         }
 
         private void ResetTrace_Click(object sender, RoutedEventArgs e)
         {
-            ResetTrace();
-        }
-
-        private void StopTrace_Click(object sender, RoutedEventArgs e)
-        {
-            _traceCts?.Cancel();
-        }
-
-        private void ResetTrace()
-        {
             PopulateTokens(_originalTokensText);
+            ClearBank();
+            GoalTextBox.Background = null;
 
             foreach (var rule in _rules)
             {
-                foreach (var cond in rule.InputConditions)
-                    cond.Background = null;
+                foreach (var condition in rule.AllConditions)
+                    condition.Background = null;
 
+                rule.TraceStatus = "";
+                rule.OutputCondition = null;
                 rule.IsTraceMode = false;
                 rule.InputConditions.Clear();
             }
@@ -521,7 +851,9 @@ namespace AIS
                 }
             }
 
-            StopTraceButton.IsEnabled = false;
+            TraceStepText.Text = "";
+            TraceStepText.FontWeight = FontWeights.Normal;
+            BlockOverlay.Visibility = Visibility.Collapsed;
             SetEditControlsEnabled(true);
             ResetTraceButton.IsEnabled = false;
             _isTraceRunning = false;

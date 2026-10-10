@@ -10,7 +10,14 @@ namespace AIS.Model
         Partial,
         Commit,
         AddVariable,
-        SequenceInspect
+        SequenceInspect,
+        GoalSet,
+        ReverseSequenceInspect,
+        ReverseInspect,
+        ReverseCommit,
+        BankAdd,
+        TokenCheck,
+        PassEnd
     }
 
     internal class LogState
@@ -20,5 +27,8 @@ namespace AIS.Model
         public ConditionSequence? ConditionSequence { get; set; } = null;
         public ExpertSystemToken? ExpertSystemToken { get; set; } = null;
         public ExpertSystemToken? InspectedToken { get; set; } = null;
+        public int Iteration { get; set; } = 0;
+        public bool? Checked { get; set; } = null;
+        public string? Message { get; set; } = null;
     }
 }

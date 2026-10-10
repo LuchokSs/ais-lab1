@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AIS"
         mc:Ignorable="d"
-        Title="Экспертная система" Height="650" Width="900">
+        Title="Экспертная система" Height="780" Width="900">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <local:InvertedBoolToVisibilityConverter x:Key="InvertedBoolToVisibilityConverter"/>
@@ -54,7 +54,22 @@
                                     </ItemsControl>
                                     <TextBlock Text="ТО:" FontWeight="SemiBold"/>
                                     <TextBox Text="{Binding OutputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                             FontFamily="Consolas" Margin="0,2,0,4"/>
+                                             FontFamily="Consolas" Margin="0,2,0,4"
+                                             Visibility="{Binding IsTraceMode, Converter={StaticResource InvertedBoolToVisibilityConverter}}"/>
+                                    <Border Background="{Binding OutputCondition.Background}" Padding="4,2" Margin="0,2" CornerRadius="2">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding OutputCondition}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding OutputCondition.Text}" FontFamily="Consolas"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding TraceStatus}" FontStyle="Italic" Foreground="#666"
+                                               Margin="2,2,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
 
                                 <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
@@ -68,21 +83,28 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
-            <Button x:Name="AddRuleButton" Content="Добавить правило" Padding="10,3" Margin="0,0,8,0"
-                    Click="AddRule_Click"/>
-            <Button x:Name="SaveButton" Content="Сохранить файл" Padding="10,3" Margin="0,0,8,0"
-                    Click="SaveButton_Click"/>
-            <Button x:Name="ReloadButton" Content="Перечитать файл" Padding="10,3" Margin="0,0,8,0"
-                    Click="ReloadButton_Click"/>
-            <Button x:Name="ShowTraceButton" Content="Показать трассировку" Padding="10,3" Margin="0,0,8,0"
-                    Click="ShowTrace_Click"/>
-            <Button x:Name="StopTraceButton" Content="Остановить трассировку" Padding="10,3" Margin="0,0,8,0"
-                    IsEnabled="False"
-                    Click="StopTrace_Click"/>
-            <Button x:Name="ResetTraceButton" Content="Сбросить трассировку" Padding="10,3" IsEnabled="False"
-                    Click="ResetTrace_Click"/>
-        </StackPanel>
+        <Grid Grid.Row="2" Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                <Button x:Name="AddRuleButton" Content="Добавить правило" Padding="10,3" Margin="0,0,8,0"
+                        Click="AddRule_Click"/>
+                <Button x:Name="SaveButton" Content="Сохранить файл" Padding="10,3" Margin="0,0,8,0"
+                        Click="SaveButton_Click"/>
+                <Button x:Name="ReloadButton" Content="Перечитать файл" Padding="10,3" Margin="0,0,8,0"
+                        Click="ReloadButton_Click"/>
+                <Button x:Name="ShowTraceButton" Content="Трассировка прямого прохода" Padding="10,3" Margin="0,0,8,0"
+                        Click="ShowTrace_Click"/>
+                <Button x:Name="ShowReverseTraceButton" Content="Трассировка обратного прохода" Padding="10,3" Margin="0,0,8,0"
+                        Click="ShowReverseTrace_Click"/>
+                <Button x:Name="ResetTraceButton" Content="Сбросить трассировку" Padding="10,3" IsEnabled="False"
+                        Click="ResetTrace_Click"/>
+            </StackPanel>
+            <TextBlock x:Name="TraceStepText" Grid.Column="1" Text="" Margin="10,0,0,0"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#444"/>
+        </Grid>
 
         <TextBlock Text="Начальное состояние"
                    Grid.Row="3" Margin="0,12,0,4" FontWeight="Bold">
@@ -93,18 +115,47 @@
         <Grid Grid.Row="4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <RichTextBox x:Name="TokensRichTextBox" Grid.Row="0" Height="120"
-                         VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-            <Button x:Name="RunButton" Grid.Row="1" Content="Получить результат"
-                    Margin="0,6,0,0" Padding="10,3" HorizontalAlignment="Left"
-                    Click="RunButton_Click"/>
-            <GroupBox Grid.Row="2" Header="Результат" Margin="0,12,0,0">
-                <TextBox x:Name="ResultTextBox" Height="90" IsReadOnly="True"
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <RichTextBox x:Name="TokensRichTextBox" Grid.Row="0" Height="70"
+                         VerticalScrollBarVisibility="Auto" FontFamily="Consolas" Grid.ColumnSpan="2"/>
+
+            <GroupBox Grid.Row="1" Header="Банк переменных" Margin="0,10,0,0" Grid.ColumnSpan="2">
+                <RichTextBox x:Name="BankRichTextBox" Height="70" FontFamily="Consolas"
+                             VerticalScrollBarVisibility="Auto"/>
+            </GroupBox>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0" Grid.ColumnSpan="2">
+                <Button x:Name="RunButton" Content="Получить результат" Padding="10,3"
+                        Click="RunButton_Click"/>
+                <Button x:Name="CheckButton" Content="Проверить результат" Padding="10,3" Margin="8,0,0,0"
+                        Click="CheckButton_Click"/>
+            </StackPanel>
+
+            <GroupBox Grid.Row="3" Header="Предполагаемый результат"
+                      Margin="0,10,0,0" Grid.ColumnSpan="2">
+                <TextBox x:Name="GoalTextBox" Height="26" FontFamily="Consolas"
+                         VerticalContentAlignment="Center" Padding="3,0">
+                    <TextBox.ToolTip>
+                        <TextBlock>Цель, которую нужно объяснить обратным проходом, например: специальность = терапевт</TextBlock>
+                    </TextBox.ToolTip>
+                </TextBox>
+            </GroupBox>
+
+            <GroupBox Grid.Row="4" Header="Результат" Margin="0,12,0,0" Grid.ColumnSpan="2">
+                <TextBox x:Name="ResultTextBox" Height="70" IsReadOnly="True"
                          TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
             </GroupBox>
         </Grid>
+
+        <Grid x:Name="BlockOverlay" Background="Transparent" IsHitTestVisible="True"
+              Visibility="Collapsed"/>
     </Grid>
 </Window>

@@ -38,5 +38,17 @@ namespace AIS.Model
 
             return result;
         }
+
+        public bool ReverseFit(ExpertSystemToken output, out List<ConditionItem> dependencies)
+        {
+            LogContext.AddReverseInspectState(Output, output);
+            if (Output.Fit(output)) 
+            {
+                dependencies = Input;
+                return true;
+            }
+            dependencies = null!;
+            return false;
+        }
     }
 }
